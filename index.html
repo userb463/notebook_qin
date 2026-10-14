@@ -1169,9 +1169,263 @@ function updateDate() {
     `${now.getMonth()+1}月${now.getDate()}日 周${days[now.getDay()]}`;
 }
 
+// ===== AI 模型设置 =====
+const API_SETTINGS_KEY = 'emotion_diary_api';
+
+function toggleSettings() {
+  const panel = document.getElementById('settingsPanel');
+  const isOpen = panel.classList.contains('show');
+  if (isOpen) {
+    panel.classList.remove('show');
+  } else {
+    panel.classList.add('show');
+    loadApiSettings();
+  }
+}
+
+function loadApiSettings() {
+  try {
+    const s = JSON.parse(localStorage.getItem(API_SETTINGS_KEY)) || DEFAULT_API;
+    document.getElementById('apiBaseUrl').value = s.baseUrl || '';
+    document.getElementById('apiKey').value = s.apiKey || '';
+    document.getElementById('apiModel').value = s.model || '';
+    if (s.apiKey) document.getElementById('apiStatus').classList.add('show');
+  } catch(e) {}
+}
+
+function saveApiSettings() {
+  const baseUrl = document.getElementById('apiBaseUrl').value.trim().replace(/\/+$/,'');
+  const apiKey = document.getElementById('apiKey').value.trim();
+  const model = document.getElementById('apiModel').value.trim();
+  if (!baseUrl || !apiKey || !model) {
+    showToast('请填写所有字段 ⚠️');
+    return;
+  }
+  localStorage.setItem(API_SETTINGS_KEY, JSON.stringify({ baseUrl, apiKey, model }));
+  const st = document.getElementById('apiStatus');
+  st.classList.add('show');
+  setTimeout(() => st.classList.remove('show'), 3000);
+  showToast('AI 模型设置已保存 ✅');
+  document.getElementById('settingsPanel').classList.remove('show');
+}
+
+const DEFAULT_API = {
+  baseUrl: 'https://api.deepseek.com/v1',
+  apiKey: 'sk-a1332367ccd24b269a30eb432009eade',
+  model: 'deepseek-chat',
+};
+
+function getApiSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(API_SETTINGS_KEY));
+    if (saved && saved.apiKey) return saved;
+  } catch(e) {}
+  return DEFAULT_API;
+}
+
+// ===== AI 情绪分析对话 =====
+let chatHistory = [];
+let chatSending = false;
+
+function autoGrow(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+const AI_SYSTEM_PROMPT = `你是一个温暖、幽默、像朋友一样的情绪倾听者。用户正在使用一个情绪日记工具向你分享今天的故事。
+
+你需要做两件事：
+1. 根据用户说的话，判断其当前的核心情绪，只能从以下五种中选择一种：糟糕、低落、一般、不错、超棒
+2. 像朋友聊天一样回复两句话。可以发散、可以开玩笑、可以接话茬，但字不要多。语气轻松自然，像微信聊天。
+
+严格按以下 JSON 格式返回（不要有其他内容）：
+{"emotion":"糟糕|低落|一般|不错|超棒","reply":"你的两句话回复"}`;
+
+async function sendChat() {
+  const input = document.getElementById('chatInput');
+  const text = input.value.trim();
+  if (!text || chatSending) return;
+
+  const settings = getApiSettings();
+  if (!settings || !settings.apiKey) {
+    showToast('请先点击右上角 ⚙️ 配置 AI 模型');
+    toggleSettings();
+    return;
+  }
+
+  // 显示用户消息
+  appendChatMsg('user', text);
+  input.value = '';
+  input.style.height = 'auto';
+  chatSending = true;
+  document.getElementById('chatSendBtn').style.opacity = '0.5';
+
+  // 显示 AI 正在输入
+  const typingEl = appendTyping();
+
+  try {
+    const resp = await fetch(settings.baseUrl + '/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + settings.apiKey
+      },
+      body: JSON.stringify({
+        model: settings.model,
+        messages: [
+          { role: 'system', content: AI_SYSTEM_PROMPT },
+          ...chatHistory.slice(-10),  // 保留最近10轮上下文
+          { role: 'user', content: text }
+        ],
+        temperature: 0.8,
+        max_tokens: 200
+      })
+    });
+
+    if (!resp.ok) {
+      const errData = await resp.json().catch(() => ({}));
+      throw new Error(errData.error?.message || `API 请求失败 (${resp.status})`);
+    }
+
+    const data = await resp.json();
+    const content = data.choices?.[0]?.message?.content || '';
+
+    // 解析 JSON
+    let emotion = '一般', reply = content;
+    try {
+      // 尝试提取 JSON（兼容 markdown code block）
+      const jsonMatch = content.match(/\{[\s\S]*?\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        emotion = parsed.emotion || '一般';
+        reply = parsed.reply || content;
+      }
+    } catch(e) { /* 解析失败就用原始内容 */ }
+
+    // 记录上下文
+    chatHistory.push({ role: 'user', content: text });
+    chatHistory.push({ role: 'assistant', content: content });
+
+    // 移除 typing，显示回复
+    typingEl.remove();
+    appendChatMsg('ai', reply);
+    showEmotionBadge(emotion);
+
+    // 自动保存到日记
+    saveChatDiary(text, emotion, reply);
+
+  } catch(err) {
+    typingEl.remove();
+    appendChatMsg('ai', '⚠️ ' + err.message);
+    showToast('AI 请求失败，请检查设置');
+  } finally {
+    chatSending = false;
+    document.getElementById('chatSendBtn').style.opacity = '1';
+  }
+}
+
+function appendChatMsg(role, text) {
+  const chatArea = document.getElementById('chatArea');
+  const div = document.createElement('div');
+  div.className = 'chat-msg ' + role;
+  const avatar = role === 'user' ? '🙋' : '🌿';
+  div.innerHTML = role === 'user'
+    ? `<div class="chat-bubble">${escapeHtml(text)}</div><div class="chat-avatar">${avatar}</div>`
+    : `<div class="chat-avatar">${avatar}</div><div class="chat-bubble">${escapeHtml(text)}</div>`;
+  chatArea.appendChild(div);
+  // 滚动到最新消息
+  div.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function appendTyping() {
+  const chatArea = document.getElementById('chatArea');
+  const div = document.createElement('div');
+  div.className = 'chat-msg ai';
+  div.innerHTML = `<div class="chat-avatar">🌿</div><div class="chat-bubble"><div class="typing-dots"><span></span><span></span><span></span></div></div>`;
+  chatArea.appendChild(div);
+  return div;
+}
+
+function showEmotionBadge(emotion) {
+  const moods = {
+    '糟糕': { emoji:'😫', cls:'mood1', score:1 },
+    '低落': { emoji:'😔', cls:'mood2', score:2 },
+    '一般': { emoji:'😐', cls:'mood3', score:3 },
+    '不错': { emoji:'😊', cls:'mood4', score:4 },
+    '超棒': { emoji:'🤩', cls:'mood5', score:5 },
+  };
+  const m = moods[emotion] || moods['一般'];
+  const badge = document.getElementById('aiEmotionBadge');
+  badge.style.display = 'block';
+  badge.innerHTML = `<span class="emotion-badge ${m.cls}"><span class="eb-emoji">${m.emoji}</span> AI 判定：${emotion}</span>`;
+}
+
+function saveChatDiary(text, emotion, reply) {
+  const moodMap = { '糟糕':1, '低落':2, '一般':3, '不错':4, '超棒':5 };
+  const mood = moodMap[emotion] || 3;
+  const data = loadData();
+  const today = getToday();
+  const idx = data.findIndex(r => r.date === today);
+  const record = {
+    date: today,
+    timestamp: new Date().toISOString(),
+    mood: mood,
+    emotions: [emotion],
+    triggers: [],
+    intensity: mood >= 4 ? 3 : mood <= 2 ? 7 : 5,
+    diary: text,
+    aiReply: reply,
+    careUsed: idx >= 0 ? data[idx].careUsed : false,
+  };
+  if (idx >= 0) {
+    data[idx].diary = text;
+    data[idx].mood = mood;
+    data[idx].emotions = data[idx].emotions.filter(e => e !== '糟糕' && e !== '低落' && e !== '一般' && e !== '不错' && e !== '超棒');
+    data[idx].emotions.unshift(emotion);
+    data[idx].aiReply = reply;
+  } else {
+    data.push(record);
+  }
+  saveData(data);
+  // 更新首页仪表盘
+  const angle = (mood - 1) / 4 * 180 - 90;
+  document.getElementById('gaugeNeedle').style.transform = `translateX(-50%) rotate(${angle}deg)`;
+  document.getElementById('todayScoreDisplay').textContent = mood.toFixed(1);
+}
+
+function escapeHtml(text) {
+  const d = document.createElement('div');
+  d.textContent = text;
+  return d.innerHTML;
+}
+
+// 点击设置面板外部时关闭
+document.addEventListener('click', function(e) {
+  const panel = document.getElementById('settingsPanel');
+  const btn = document.querySelector('.settings-btn');
+  if (panel.classList.contains('show') && !panel.contains(e.target) && !btn.contains(e.target)) {
+    panel.classList.remove('show');
+  }
+});
+
+// ===== 首次访问提示 =====
+function showWelcomeHint() {
+  const seen = localStorage.getItem('emotion_diary_hint_seen');
+  if (seen) return;
+  const hint = document.createElement('div');
+  hint.id = 'welcomeHint';
+  hint.style.cssText = `position:fixed;top:70px;right:12px;z-index:200;background:var(--text);color:#fff;padding:10px 16px;border-radius:12px;font-size:13px;box-shadow:0 4px 20px rgba(0,0,0,0.2);max-width:220px;animation:fadeIn .5s ease;line-height:1.6;cursor:pointer;`;
+  hint.innerHTML = `💡 已内置 DeepSeek AI 模型，直接开始聊天吧！<br>也可点击右上角 ⚙️ 换成你自己的 API`;
+  hint.onclick = () => hint.remove();
+  document.body.appendChild(hint);
+  localStorage.setItem('emotion_diary_hint_seen', '1');
+  setTimeout(() => { if(hint.parentNode) { hint.style.opacity='0'; hint.style.transition='opacity .5s'; setTimeout(()=>hint.remove(),500); } }, 8000);
+}
+
 // ===== 初始化 =====
 updateDate();
 renderHome();
+showWelcomeHint();
 </script>
 </body>
 </html>
