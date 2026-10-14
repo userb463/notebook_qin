@@ -88,6 +88,30 @@
   .emotion-badge.mood4 { background:rgba(107,203,119,0.12); color:#2E9E4A; }
   .emotion-badge.mood5 { background:rgba(77,150,255,0.12); color:#2E70D8; }
 
+  /* ===== 情绪跳转链接 ===== */
+  .mood-links-card { margin-top:12px; }
+  .mood-links-title { font-size:13px; font-weight:600; color:var(--text-secondary); margin-bottom:10px; }
+  .mood-links-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .mood-link-btn {
+    display:flex; align-items:center; gap:10px; padding:14px;
+    border-radius:var(--radius-sm); text-decoration:none;
+    transition:var(--transition); border:1.5px solid transparent;
+    cursor:pointer; background:var(--bg);
+  }
+  .mood-link-btn:hover { transform:translateY(-2px); box-shadow:var(--shadow-hover); }
+  .mood-link-btn .ml-icon { font-size:28px; flex-shrink:0; }
+  .mood-link-btn .ml-info { min-width:0; }
+  .mood-link-btn .ml-name { font-size:13px; font-weight:700; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .mood-link-btn .ml-desc { font-size:11px; color:var(--text-secondary); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .mood-link-btn.food { border-color:rgba(255,149,0,0.25); background:rgba(255,149,0,0.06); }
+  .mood-link-btn.food:hover { border-color:rgba(255,149,0,0.5); }
+  .mood-link-btn.music { border-color:rgba(236,72,153,0.25); background:rgba(236,72,153,0.06); }
+  .mood-link-btn.music:hover { border-color:rgba(236,72,153,0.5); }
+  .mood-link-btn.video { border-color:rgba(77,150,255,0.25); background:rgba(77,150,255,0.06); }
+  .mood-link-btn.video:hover { border-color:rgba(77,150,255,0.5); }
+  .mood-link-btn.shop { border-color:rgba(107,203,119,0.25); background:rgba(107,203,119,0.06); }
+  .mood-link-btn.shop:hover { border-color:rgba(107,203,119,0.5); }
+
   /* ===== API 设置 ===== */
   .settings-btn {
     background:none; border:none; cursor:pointer; font-size:18px;
@@ -491,6 +515,7 @@
       <button onclick="sendChat()" id="chatSendBtn" style="flex-shrink:0;width:44px;height:44px;border-radius:50%;border:none;background:linear-gradient(135deg,var(--primary),var(--primary-light));color:#fff;font-size:18px;cursor:pointer;transition:var(--transition)" title="发送">➤</button>
     </div>
     <div id="aiEmotionBadge" style="display:none;margin-top:12px"></div>
+    <div id="moodLinks" style="display:none"></div>
   </div>
 
   <!-- 心情仪表盘 -->
@@ -623,6 +648,12 @@
   </div>
 
   <div id="careCards"></div>
+
+  <!-- 情绪跳转链接 -->
+  <div class="card" id="careMoodLinksCard" style="display:none">
+    <div class="card-title"><span class="icon">🔗</span>心情补给站</div>
+    <div id="careMoodLinks"></div>
+  </div>
 </div>
 
 <!-- ===== 历史页 ===== -->
@@ -944,6 +975,17 @@ function renderCare() {
     </div>
   `).join('');
   document.getElementById('careRecommend').innerHTML = recommendHtml;
+
+  // 情绪跳转链接（根据最近心情）
+  const moodMap = { 1:'糟糕', 2:'低落', 3:'一般', 4:'不错', 5:'超棒' };
+  let latestMood = '一般';
+  if (data2.length > 0) {
+    const latest = data2[data2.length - 1];
+    latestMood = moodMap[Math.round(latest.mood)] || '一般';
+  }
+  const moodLinksCard = document.getElementById('careMoodLinksCard');
+  moodLinksCard.style.display = 'block';
+  document.getElementById('careMoodLinks').innerHTML = buildMoodLinks(latestMood);
 
   renderCareCards();
 }
@@ -1358,6 +1400,81 @@ function showEmotionBadge(emotion) {
   const badge = document.getElementById('aiEmotionBadge');
   badge.style.display = 'block';
   badge.innerHTML = `<span class="emotion-badge ${m.cls}"><span class="eb-emoji">${m.emoji}</span> AI 判定：${emotion}</span>`;
+
+  // 显示情绪对应的跳转链接
+  const linksDiv = document.getElementById('moodLinks');
+  linksDiv.style.display = 'block';
+  linksDiv.innerHTML = buildMoodLinks(emotion);
+}
+
+// ===== 情绪 → 外部跳转链接 =====
+function buildMoodLinks(emotion) {
+  // 美团外卖搜索链接 + 网易云音乐歌单链接
+  const LINKS = {
+    '糟糕': {
+      title: '😢 心情很糟？吃点好的治愈一下，或听听歌放松',
+      links: [
+        { cls:'food', icon:'🍜', name:'点份热汤外卖', desc:'美团搜「热汤」暖暖胃', url:'https://www.meituan.com/s/热汤' },
+        { cls:'food', icon:'🍰', name:'来块甜品吧', desc:'美团搜「蛋糕」补充甜分', url:'https://www.meituan.com/s/蛋糕' },
+        { cls:'music', icon:'🎵', name:'网易云·治愈歌单', desc:'舒缓纯音乐疗愈心情', url:'https://music.163.com/#/search/m/?s=治愈纯音乐' },
+        { cls:'music', icon:'🌧️', name:'网易云·雨声白噪', desc:'雨声伴你安静一会', url:'https://music.163.com/#/search/m/?s=雨声助眠' },
+      ]
+    },
+    '低落': {
+      title: '😔 有点低落？吃点好的、听首歌转换心情',
+      links: [
+        { cls:'food', icon:'🍲', name:'暖心火锅/热饮', desc:'美团搜「火锅外送」', url:'https://www.meituan.com/s/火锅' },
+        { cls:'food', icon:'🧋', name:'一杯甜奶茶', desc:'美团搜「奶茶」快乐水', url:'https://www.meituan.com/s/奶茶' },
+        { cls:'music', icon:'🎧', name:'网易云·励志歌单', desc:'低落时听点有力量的歌', url:'https://music.163.com/#/search/m/?s=励志歌曲' },
+        { cls:'music', icon:'🌅', name:'网易云·清晨轻音乐', desc:'帮你重新出发', url:'https://music.163.com/#/search/m/?s=轻音乐' },
+      ]
+    },
+    '一般': {
+      title: '😐 一般般？来点美食或音乐提提神',
+      links: [
+        { cls:'food', icon:'🍔', name:'点个喜欢的外卖', desc:'美团搜「汉堡」或你爱吃的', url:'https://www.meituan.com/s/汉堡' },
+        { cls:'food', icon:'🍕', name:'披萨配电影', desc:'美团搜「披萨」', url:'https://www.meituan.com/s/披萨' },
+        { cls:'music', icon:'🎶', name:'网易云·热门新歌', desc:'听听最近流行什么', url:'https://music.163.com/#/search/m/?s=热门新歌' },
+        { cls:'music', icon:'🔥', name:'网易云·摇滚燃曲', desc:'来首燃的提提精神', url:'https://music.163.com/#/search/m/?s=摇滚' },
+      ]
+    },
+    '不错': {
+      title: '😊 心情不错！配顿好饭+喜欢的音乐更开心',
+      links: [
+        { cls:'food', icon:'🍣', name:'点份好的犒劳自己', desc:'美团搜「日料」或你喜欢的', url:'https://www.meituan.com/s/日料' },
+        { cls:'food', icon:'🥘', name:'来顿丰盛晚餐', desc:'美团搜「烤肉」', url:'https://www.meituan.com/s/烤肉' },
+        { cls:'music', icon:'🥳', name:'网易云·快乐歌单', desc:'开心时听开心的歌', url:'https://music.163.com/#/search/m/?s=快乐歌单' },
+        { cls:'music', icon:'💃', name:'网易云·蹦迪舞曲', desc:'跟着节奏嗨起来', url:'https://music.163.com/#/search/m/?s=电子舞曲' },
+      ]
+    },
+    '超棒': {
+      title: '🤩 状态超棒！用美食和音乐延续这份快乐',
+      links: [
+        { cls:'food', icon:'🎉', name:'庆祝一下！点大餐', desc:'美团搜「自助餐」奖励自己', url:'https://www.meituan.com/s/自助餐' },
+        { cls:'food', icon:'🍨', name:'甜蜜收尾', desc:'美团搜「冰淇淋」', url:'https://www.meituan.com/s/冰淇淋' },
+        { cls:'music', icon:'🏆', name:'网易云·巅峰热榜', desc:'听最火的歌保持好状态', url:'https://music.163.com/#/search/m/?s=热歌榜' },
+        { cls:'music', icon:'🌍', name:'网易云·环球旅行歌单', desc:'边听边想象远方', url:'https://music.163.com/#/search/m/?s=旅行音乐' },
+      ]
+    },
+  };
+
+  const config = LINKS[emotion] || LINKS['一般'];
+  return `
+    <div class="mood-links-card">
+      <div class="mood-links-title">${config.title}</div>
+      <div class="mood-links-grid">
+        ${config.links.map(l => `
+          <a class="mood-link-btn ${l.cls}" href="${l.url}" target="_blank" rel="noopener noreferrer">
+            <div class="ml-icon">${l.icon}</div>
+            <div class="ml-info">
+              <div class="ml-name">${l.name}</div>
+              <div class="ml-desc">${l.desc}</div>
+            </div>
+          </a>
+        `).join('')}
+      </div>
+    </div>
+  `;
 }
 
 function saveChatDiary(text, emotion, reply) {
